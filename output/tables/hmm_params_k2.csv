@@ -1,0 +1,3 @@
+state_rank,mean_ret_%,sd_ret_%,mean_ln_rv5,typical_rv5_%,stay_prob,exp_duration_days,uncond_freq
+0,-0.0032,0.3172,1.5256,4.5978,0.9478,19.1462,0.5561
+1,0.0111,0.9059,2.3831,10.8384,0.9305,14.3893,0.4439
