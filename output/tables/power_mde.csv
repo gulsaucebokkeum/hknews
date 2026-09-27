@@ -1,0 +1,7 @@
+risk_set,n_treated,n_control,baseline_exit_prob,MDE_80pct_power
+risk_set_20,22,633,0.300,0.278
+risk_set_20,22,633,0.500,0.304
+risk_set_nc20,39,1681,0.300,0.208
+risk_set_nc20,39,1681,0.500,0.227
+risk_set_lvl20,46,2075,0.300,0.191
+risk_set_lvl20,46,2075,0.500,0.209

@@ -17,12 +17,19 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+try:
+    import koreanize_matplotlib  # 한글 폰트(NanumGothic)
+except ImportError:
+    pass
 warnings.filterwarnings("ignore")
 rng = np.random.default_rng(20260927)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROC = os.path.join(ROOT, "data", "processed"); EVD = os.path.join(ROOT, "data", "events")
 TAB = os.path.join(ROOT, "output", "tables"); FIG = os.path.join(ROOT, "output", "figures")
+FIG_ONLY = bool(os.environ.get("FIG_ONLY"))
+if FIG_ONLY:
+    TAB = os.path.join(ROOT, "output", "_figonly_tmp"); os.environ["B_BOOT"] = "0"; os.environ["N_PLACEBO"] = "0"
 for d in (TAB, FIG): os.makedirs(d, exist_ok=True)
 
 RISK = os.environ.get("RISK_SET", "risk_set_20")          # 강건성: risk_set_10/30/hmm/rec20/k4_20/k2_20/dir20
@@ -139,9 +146,10 @@ def estimate(sub, treat, outcome, with_ps=True):
         out["aipw"] = aipw(Y, D, X, p)
     return out
 
+BOOT_OUTCOMES = ["exit5", "exit10", "exit20", "cr5", "ab5", "dvol5"]; BOOT_TREATS = ["D_dep_pure", "D_dep_hq"]
 def block_bootstrap(sub, treat, outcome, B=B_BOOT, block=20):
     """달력 기준 20거래일 이동블록 부트스트랩(전체 패널을 재표집 후 위험집합만 사용)"""
-    full = df.copy(); T = len(full); est_i, est_a = [], []
+    full = df[[outcome, treat, "risk"] + XCOLS].copy(); T = len(full); est_i, est_a = [], []
     nblocks = int(np.ceil(T / block))
     for b in range(B):
         starts = rng.integers(0, T - block + 1, size=nblocks)
@@ -165,7 +173,8 @@ rows = []
 for treat in TREATS:
     for outcome in OUTCOMES:
         res = estimate(sub, treat, outcome)
-        (ilo, ihi), (alo, ahi) = block_bootstrap(sub, treat, outcome) if res["n_treated"] >= 3 else ((np.nan, np.nan), (np.nan, np.nan))
+        do_boot = res["n_treated"] >= 3 and outcome in BOOT_OUTCOMES and treat in BOOT_TREATS
+        (ilo, ihi), (alo, ahi) = block_bootstrap(sub, treat, outcome) if do_boot else ((np.nan, np.nan), (np.nan, np.nan))
         rows.append({"treatment": treat, "outcome": outcome, **res, "iptw_ci_lo": ilo, "iptw_ci_hi": ihi, "aipw_ci_lo": alo, "aipw_ci_hi": ahi})
         print(f"{treat:11s} {outcome:7s} n={res['n']:4d} nT={res['n_treated']:3d} naive={res['naive']:+.3f} iptw={res['iptw']:+.3f} (se {res['iptw_se']:.3f}; CI {ilo:+.3f},{ihi:+.3f}) aipw={res['aipw']:+.3f} (CI {alo:+.3f},{ahi:+.3f})")
 main = pd.DataFrame(rows); main.to_csv(os.path.join(TAB, f"main_effects_{RISK}.csv"), index=False, float_format="%.4f")
@@ -188,10 +197,11 @@ if D.sum() >= 3:
 
 # ------------------------------------------------------------------ 위약검정 1: 위험집합 내 무작위 날짜
 plac = {}
-for outcome in ["exit5", "exit10", "exit20", "cr5"]:
+for outcome in ["exit10", "exit20", "cr5", "ab5"]:
     d = sub[[outcome, "D_dep_pure", "spell"] + XCOLS].dropna(); nT = int(d["D_dep_pure"].sum())
     if nT < 3: continue
     actual = estimate(sub, "D_dep_pure", outcome)["iptw"]; dist = []
+    if N_PLACEBO == 0: continue
     for b in range(N_PLACEBO):
         dd = d.copy(); dd["Dp"] = 0; dd.iloc[rng.choice(len(dd), nT, replace=False), dd.columns.get_loc("Dp")] = 1
         dist.append(estimate(dd, "Dp", outcome)["iptw"])
@@ -289,7 +299,7 @@ if len(tr) >= 3:
     lo, hi = np.percentile(boot, [2.5, 97.5], axis=0)
     plt.figure(figsize=(8, 4.5)); plt.fill_between(H, lo, hi, color="#d62728", alpha=0.15); plt.plot(H, mean_t, color="#d62728", lw=2, label=f"구두개입일(순수, n={len(paths)})")
     if len(ctrl_paths): plt.plot(H, ctrl_paths.mean(0), color="#1f77b4", lw=2, ls="--", label=f"성향점수 대조일(n={len(ctrl_paths)})")
-    plt.axhline(0, color="k", lw=0.6); plt.axvline(0, color="k", lw=0.6, ls=":"); plt.xlabel("발언일 대비 거래일"); plt.ylabel("누적 로그환율 변화(%, t−1 기준)")
+    plt.axhline(0, color="k", lw=0.6); plt.axvline(0, color="k", lw=0.6, ls=":"); plt.xlabel("발언일 대비 거래일"); plt.ylabel("누적 로그환율 변화(%, t-1 기준)")
     plt.title("사건연구: 고환율 스트레스 국면 내 구두개입 전후 원/달러 경로"); plt.legend(); plt.tight_layout(); plt.savefig(os.path.join(FIG, f"fig2_eventstudy_{RISK}.png"), dpi=140); plt.close()
     # 이탈곡선 (가중 KM 근사): P(T_exit <= h)
     d = sub[["D_dep_pure", "t_exit", "spell"] + XCOLS].copy(); d["t_exit"] = d["t_exit"].fillna(999)
@@ -305,6 +315,6 @@ if len(tr) >= 3:
     summary["exit_curve"] = {k: [round(float(x), 3) for x in v[:21]] for k, v in curves.items()}
 
 summary["placebo"] = plac; summary["main"] = main.to_dict(orient="records")
-with open(os.path.join(ROOT, "output", f"results_summary_{RISK}.json"), "w", encoding="utf-8") as f:
+with open(os.path.join(TAB if FIG_ONLY else os.path.join(ROOT, "output"), f"results_summary_{RISK}.json"), "w", encoding="utf-8") as f:
     json.dump(summary, f, ensure_ascii=False, indent=1, default=float)
 print("\ndone:", RISK)

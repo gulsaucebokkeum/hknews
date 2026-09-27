@@ -13,6 +13,10 @@ from hmmlearn.hmm import GaussianHMM
 from scipy.stats import multivariate_normal
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+try:
+    import koreanize_matplotlib  # 한글 폰트(NanumGothic)
+except ImportError:
+    pass
 warnings.filterwarnings("ignore")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

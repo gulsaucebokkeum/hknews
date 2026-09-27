@@ -9,12 +9,17 @@ x_t = 당일 구두개입(순수, 원화약세 억제) 지표. 기울기 b는 �
 출력: output/tables/tvtp_results.csv, output/figures/fig6_tvtp.png
 """
 import os, json, warnings
+LAG = int(os.environ.get("LAG", "0"))   # x_t = D_{t-LAG}: LAG=1이면 전일 발언이 익일 전이에 미치는 효과(당일 역인과 회피)
 import numpy as np, pandas as pd
 from scipy.optimize import minimize
 from scipy.stats import chi2
 from hmmlearn.hmm import GaussianHMM
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+try:
+    import koreanize_matplotlib  # 한글 폰트(NanumGothic)
+except ImportError:
+    pass
 warnings.filterwarnings("ignore")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,7 +92,7 @@ results = {}; rows = []
 x0 = np.zeros(T)
 r0 = fit(x0, use_b=False); ll0 = -r0.fun
 for name in ["D_dep_pure", "D_dep_hq", "D_dep", "D_app"]:
-    x = d[name].values.astype(float)
+    x = d[name].shift(LAG).fillna(0).values.astype(float)
     r1 = fit(x, use_b=True, th0=r0.x); ll1 = -r1.fun
     mu, Sig, a, b = unpack(r1.x)
     P0 = trans_mats(a, b, np.array([0.0]))[0]; P1 = trans_mats(a, b, np.array([1.0]))[0]
@@ -97,15 +102,15 @@ for name in ["D_dep_pure", "D_dep_hq", "D_dep", "D_app"]:
                      "P_elev_to_stress_x0": P0[1, 2], "P_elev_to_stress_x1": P1[1, 2], "P_elev_to_calm_x0": P0[1, 0], "P_elev_to_calm_x1": P1[1, 0], "b": b.tolist()}
     print(f"{name}: n(x=1)={int(x.sum())} LR={lr:.2f} p={pv:.3f} | stress stay: {P0[2,2]:.3f} -> {P1[2,2]:.3f} | elev->stress: {P0[1,2]:.3f} -> {P1[1,2]:.3f} | elev->calm: {P0[1,0]:.3f} -> {P1[1,0]:.3f}")
     rows.append({"covariate": name, **{k: v for k, v in results[name].items() if k != "b"}})
-tab = pd.DataFrame(rows); tab.to_csv(os.path.join(TAB, "tvtp_results.csv"), index=False, float_format="%.4f")
-with open(os.path.join(ROOT, "output", "tvtp_results.json"), "w") as f: json.dump(results, f, indent=1)
+tab = pd.DataFrame(rows); tab["lag"] = LAG; tab.to_csv(os.path.join(TAB, f"tvtp_results_lag{LAG}.csv"), index=False, float_format="%.4f")
+with open(os.path.join(ROOT, "output", f"tvtp_results_lag{LAG}.json"), "w") as f: json.dump(results, f, indent=1)
 
 fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 names = ["D_dep_pure", "D_dep_hq", "D_dep", "D_app"]; xx = np.arange(len(names))
 ax[0].bar(xx - 0.2, [results[n]["P_stress_to_nonstress_x0"] for n in names], 0.4, label="발언 없음", color="#9ecae1")
 ax[0].bar(xx + 0.2, [results[n]["P_stress_to_nonstress_x1"] for n in names], 0.4, label="발언일", color="#d62728")
-ax[0].set_xticks(xx); ax[0].set_xticklabels(names, rotation=15); ax[0].set_title("P(스트레스 → 비스트레스), 1일 전이"); ax[0].legend()
+ax[0].set_xticks(xx); ax[0].set_xticklabels(names, rotation=15); ax[0].set_title(f"P(스트레스 → 비스트레스), 1일 전이 (발언 시차 {LAG}일)"); ax[0].legend()
 ax[1].bar(xx - 0.2, [results[n]["P_elev_to_stress_x0"] for n in names], 0.4, label="발언 없음", color="#9ecae1")
 ax[1].bar(xx + 0.2, [results[n]["P_elev_to_stress_x1"] for n in names], 0.4, label="발언일", color="#d62728")
 ax[1].set_xticks(xx); ax[1].set_xticklabels(names, rotation=15); ax[1].set_title("P(변동성 확대 → 스트레스), 1일 전이"); ax[1].legend()
-plt.tight_layout(); plt.savefig(os.path.join(FIG, "fig6_tvtp.png"), dpi=140); plt.close(); print("saved fig6")
+plt.tight_layout(); plt.savefig(os.path.join(FIG, f"fig6_tvtp_lag{LAG}.png"), dpi=140); plt.close(); print("saved fig6")
